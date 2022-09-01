@@ -162,11 +162,16 @@ action() {
             if [ -z "$(ls -A sm-htt-analysis)" ]; then
                 git submodule update --init --recursive -- sm-htt-analysis
             fi
+            export MODULE_PYTHONPATH=sm-htt-analysis
             ;;
         *)
             ;;
     esac
     ############################################
+
+    if [[ ! -z ${MODULE_PYTHONPATH} ]]; then
+        export PYTHONPATH=${MODULE_PYTHONPATH}:${PYTHONPATH}
+    fi
 
     # Check is law was cloned, and set it up if not
     if [ -z "$(ls -A law)" ]; then
