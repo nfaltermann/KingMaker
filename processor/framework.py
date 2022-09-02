@@ -317,7 +317,7 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
         config.custom_content.append(
             ("accounting_group", self.htcondor_accounting_group)
         )
-        # config.custom_content.append(("Log", "log.txt")) #
+        # config.custom_content.append(("Log", "log_{}to{}.txt".format(branches[0], branches[-1]))) #
         # config.custom_content.append(("stream_output", "True")) #
         # config.custom_content.append(("Output", "out_{}to{}.txt".format(branches[0], branches[-1]))) #Remove before commit
         # config.custom_content.append(("stream_error", "True")) #
@@ -361,7 +361,7 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
                 "--exclude",
                 "*.pyc",
                 "--exclude",
-                "law/.git",
+                "*.git",
                 "-czf",
                 "tarballs/{}/{}/processor.tar.gz".format(
                     self.production_tag, task_name

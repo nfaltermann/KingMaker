@@ -81,7 +81,6 @@ action(){
     export LOCAL_PWD="{{LOCAL_PWD}}"
 
     export ANALYSIS_DATA_PATH=$(pwd)
-    env
 }
 
 action

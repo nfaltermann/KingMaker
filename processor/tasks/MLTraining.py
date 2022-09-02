@@ -136,6 +136,10 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         "fold{fold}_keras_preprocessing.pickle",
         "fold{fold}_loss.pdf",
         "fold{fold}_loss.png",
+        "fold{fold}_keras_architecture.json",
+        "fold{fold}_keras_variables.json",
+        "fold{fold}_keras_weights.h5",
+        "fold{fold}_lwtnn.json",
     ]
 
     # Create map for the branches of this task
@@ -310,6 +314,34 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
             sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
         )
 
+        ## Convert model to lwtnn format
+        self.run_command(
+            command=[
+                "python",
+                "ml_trainings/export_keras_to_json.py",
+                "--training-config {}".format(config_file_rel),
+                "--training-name {}".format(training_name),
+                "--fold {}".format(fold),
+                "--in-out-dir {}".format(out_dir),
+            ],
+            run_location=run_loc,
+            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+        )
+
+        self.run_command(
+            command=[
+                "python",
+                "lwtnn/converters/keras2json.py",
+                "{dir}/fold{fold}_keras_architecture.json".format(dir=out_dir, fold=fold),
+                "{dir}/fold{fold}_keras_variables.json".format(dir=out_dir, fold=fold),
+                "{dir}/fold{fold}_keras_weights.h5".format(dir=out_dir, fold=fold),
+                "> {dir}/fold{fold}_lwtnn.json".format(dir=out_dir, fold=fold),
+            ],
+            run_location=run_loc,
+            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+        )
+
+        # Copy locally created files to remote storage
         out_files = [
             "/".join([
                 out_dir,
@@ -318,7 +350,6 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
             for file_template in self.file_templates
         ]
 
-        # Copy locally created files to remote storage
         console.log("File copy out start.")
         for file_remote, file_local in zip(self.output(), out_files):
             file_remote.parent.touch()
