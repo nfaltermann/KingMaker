@@ -25,10 +25,32 @@ except OSError:
 console = Console(width=current_width)
 
 
+# Add analysis specific changes to the HTCondor Workflow task
+class HTCondorWorkflowML(HTCondorWorkflow):
+    # Add branch specific names to the HTCondor jobs
+    def htcondor_job_config(self, config, job_num, branches):
+        config = super(HTCondorWorkflow, self).htcondor_job_config(config, job_num, branches)
+        name_list = ["_".join(info) for info in self.datashard_information]
+        task_name = self.__class__.__name__
+        # Write job config file
+        if name_list:
+            branch_names = []
+            for branch in branches:
+                branch_names.append(name_list[branch])
+            branch_str = "|".join(branch_names)
+            config.custom_content.append(
+                ("JobBatchName", f"{task_name}-{branch_str}")
+            )
+        else:
+            config.custom_content.append(
+                ("JobBatchName", f"{task_name}")
+            )
+        return config
+
 # Task to create root shards for the NN training
 # One shard is created for each process (like "ff" and "NMSSM_240_125_60")
 # Shards are NOT shared between eras and decay channels
-class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
+class CreateTrainingDataShard(HTCondorWorkflowML, law.LocalWorkflow):
     # Define luigi parameters
     datashard_information = luigi.ListParameter(description="List of, tuples of process identifier and class mapping")
     process_config_dirs = luigi.ListParameter(description="List of process config dirs in which the datashard configs could be")
@@ -53,7 +75,7 @@ class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
             \n{}".format(
             self
         )
-        return branches
+        return branches[4:8]
 
     # Define output targets. Task is considerd complete if all targets are present.
     def output(self):
@@ -125,7 +147,7 @@ class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
 # One training is performed for each valid combination of:
 # channel, mass, batch and fold
 # The datashards are combined based on the training parameters
-class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
+class RunTraining(HTCondorWorkflowML, law.LocalWorkflow):
     # Define luigi parameters
     training_information = luigi.ListParameter(description="List of, tuples of training name and training config file")
 
@@ -271,6 +293,7 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         return targets
 
     def run(self):
+        exit(1)
         fold = self.branch_data["fold"]
         run_loc = "sm-htt-analysis"
         training_name, config_file = self.branch_data["training_information"]
