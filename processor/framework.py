@@ -430,7 +430,6 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
         config.render_variables["LOCAL_TIMESTAMP"] = startup_time
         config.render_variables["LOCAL_PWD"] = startup_dir
         config.render_variables["MODULE_PYTHONPATH"] = os.getenv("MODULE_PYTHONPATH")
-        
         return config
 
 

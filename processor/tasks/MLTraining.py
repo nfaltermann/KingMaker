@@ -24,13 +24,21 @@ except OSError:
     current_width = 140
 console = Console(width=current_width)
 
+# Task to create root shards for the NN training
+# One shard is created for each process (like "ff" and "NMSSM_240_125_60")
+# Shards are NOT shared between eras and decay channels
+class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
+    # Define luigi parameters
+    datashard_information = luigi.ListParameter(description="List of, tuples of process identifier and class mapping")
+    process_config_dirs = luigi.ListParameter(description="List of process config dirs in which the datashard configs could be")
 
-# Add analysis specific changes to the HTCondor Workflow task
-class HTCondorWorkflowML(HTCondorWorkflow):
+    # Set other variables and templates used by this class.
+    files_template = "{identifier}_{training_class}_datashard_fold{fold}.root"
+
     # Add branch specific names to the HTCondor jobs
     def htcondor_job_config(self, config, job_num, branches):
-        config = super(HTCondorWorkflow, self).htcondor_job_config(config, job_num, branches)
-        name_list = ["_".join(info) for info in self.datashard_information]
+        config = super(CreateTrainingDataShard, self).htcondor_job_config(config, job_num, branches)
+        name_list = ["_".join(info + (fold,)) for info in self.datashard_information for fold in ["0","1"]]
         task_name = self.__class__.__name__
         # Write job config file
         if name_list:
@@ -46,17 +54,6 @@ class HTCondorWorkflowML(HTCondorWorkflow):
                 ("JobBatchName", f"{task_name}")
             )
         return config
-
-# Task to create root shards for the NN training
-# One shard is created for each process (like "ff" and "NMSSM_240_125_60")
-# Shards are NOT shared between eras and decay channels
-class CreateTrainingDataShard(HTCondorWorkflowML, law.LocalWorkflow):
-    # Define luigi parameters
-    datashard_information = luigi.ListParameter(description="List of, tuples of process identifier and class mapping")
-    process_config_dirs = luigi.ListParameter(description="List of process config dirs in which the datashard configs could be")
-
-    # Set other variables and templates used by this class.
-    files_template = "{identifier}_{training_class}_datashard_fold{fold}.root"
 
     # Create map for the branches of this task.
     # Each branch can be run as an individula job
@@ -75,7 +72,7 @@ class CreateTrainingDataShard(HTCondorWorkflowML, law.LocalWorkflow):
             \n{}".format(
             self
         )
-        return branches[4:8]
+        return branches
 
     # Define output targets. Task is considerd complete if all targets are present.
     def output(self):
@@ -108,7 +105,9 @@ class CreateTrainingDataShard(HTCondorWorkflowML, law.LocalWorkflow):
             raise Exception("Incorrect process config file path.")
         else:
             process_config_file = file_list[0]
-        out_dir = self.local_path("")
+        # out_dir = self.local_path("")
+        out_file = self.wlcg_path + self.output().path
+        out_dir = os.path.dirname(out_file)
         os.makedirs(out_dir, exist_ok=True)
 
         # Create datashard based on config file
@@ -127,27 +126,11 @@ class CreateTrainingDataShard(HTCondorWorkflowML, law.LocalWorkflow):
             run_location=run_loc,
         )
 
-        produced_file = "/".join([
-            out_dir,
-            self.files_template.format(
-                identifier=identifier,
-                training_class=training_class,
-                fold=self.branch_data["fold"],
-            ),
-        ])
-        remote_file_target = self.output()
-
-        # Copy locally created files to remote storage
-        console.log("File copy out start.")
-        remote_file_target.parent.touch()
-        remote_file_target.copy_from_local(produced_file)
-        console.log("File copy out end.")
-
 # Task to run NN training (2 folds)
 # One training is performed for each valid combination of:
 # channel, mass, batch and fold
 # The datashards are combined based on the training parameters
-class RunTraining(HTCondorWorkflowML, law.LocalWorkflow):
+class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
     # Define luigi parameters
     training_information = luigi.ListParameter(description="List of, tuples of training name and training config file")
 
@@ -163,6 +146,26 @@ class RunTraining(HTCondorWorkflowML, law.LocalWorkflow):
         "fold{fold}_keras_weights.h5",
         "fold{fold}_lwtnn.json",
     ]
+
+    # Add branch specific names to the HTCondor jobs
+    def htcondor_job_config(self, config, job_num, branches):
+        config = super(RunTraining, self).htcondor_job_config(config, job_num, branches)
+        name_list = ["_".join([info[0], fold]) for info in self.training_information for fold in ["0","1"]]
+        task_name = self.__class__.__name__
+        # Write job config file
+        if name_list:
+            branch_names = []
+            for branch in branches:
+                branch_names.append(name_list[branch])
+            branch_str = "|".join(branch_names)
+            config.custom_content.append(
+                ("JobBatchName", f"{task_name}-{branch_str}")
+            )
+        else:
+            config.custom_content.append(
+                ("JobBatchName", f"{task_name}")
+            )
+        return config
 
     # Create map for the branches of this task
     def create_branch_map(self):
