@@ -40,19 +40,13 @@ class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
         config = super(CreateTrainingDataShard, self).htcondor_job_config(config, job_num, branches)
         name_list = ["_".join(info + (fold,)) for info in self.datashard_information for fold in ["0","1"]]
         task_name = self.__class__.__name__
-        # Write job config file
-        if name_list:
-            branch_names = []
-            for branch in branches:
-                branch_names.append(name_list[branch])
-            branch_str = "|".join(branch_names)
-            config.custom_content.append(
-                ("JobBatchName", f"{task_name}-{branch_str}")
-            )
-        else:
-            config.custom_content.append(
-                ("JobBatchName", f"{task_name}")
-            )
+        branch_names = []
+        for branch in branches:
+            branch_names.append(name_list[branch])
+        branch_str = "|".join(branch_names)
+        config.custom_content.append(
+            ("JobBatchName", f"{task_name}-{branch_str}")
+        )
         return config
 
     # Create map for the branches of this task.
@@ -152,19 +146,13 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         config = super(RunTraining, self).htcondor_job_config(config, job_num, branches)
         name_list = ["_".join([info[0], fold]) for info in self.training_information for fold in ["0","1"]]
         task_name = self.__class__.__name__
-        # Write job config file
-        if name_list:
-            branch_names = []
-            for branch in branches:
-                branch_names.append(name_list[branch])
-            branch_str = "|".join(branch_names)
-            config.custom_content.append(
-                ("JobBatchName", f"{task_name}-{branch_str}")
-            )
-        else:
-            config.custom_content.append(
-                ("JobBatchName", f"{task_name}")
-            )
+        branch_names = []
+        for branch in branches:
+            branch_names.append(name_list[branch])
+        branch_str = "|".join(branch_names)
+        config.custom_content.append(
+            ("JobBatchName", f"{task_name}-{branch_str}")
+        )
         return config
 
     # Create map for the branches of this task
@@ -296,7 +284,6 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         return targets
 
     def run(self):
-        exit(1)
         fold = self.branch_data["fold"]
         run_loc = "sm-htt-analysis"
         training_name, config_file = self.branch_data["training_information"]
