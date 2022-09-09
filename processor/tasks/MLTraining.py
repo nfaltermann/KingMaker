@@ -29,24 +29,32 @@ console = Console(width=current_width)
 # Shards are NOT shared between eras and decay channels
 class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
     # Define luigi parameters
-    datashard_information = luigi.ListParameter(description="List of, tuples of process identifier and class mapping")
-    process_config_dirs = luigi.ListParameter(description="List of process config dirs in which the datashard configs could be")
+    datashard_information = luigi.ListParameter(
+        description="List of, tuples of process identifier and class mapping"
+    )
+    process_config_dirs = luigi.ListParameter(
+        description="List of process config dirs in which the datashard configs could be"
+    )
 
     # Set other variables and templates used by this class.
     files_template = "{identifier}_{training_class}_datashard_fold{fold}.root"
 
     # Add branch specific names to the HTCondor jobs
     def htcondor_job_config(self, config, job_num, branches):
-        config = super(CreateTrainingDataShard, self).htcondor_job_config(config, job_num, branches)
-        name_list = ["_".join(info + (fold,)) for info in self.datashard_information for fold in ["0","1"]]
+        config = super(CreateTrainingDataShard, self).htcondor_job_config(
+            config, job_num, branches
+        )
+        name_list = [
+            "_".join(info + (fold,))
+            for info in self.datashard_information
+            for fold in ["0", "1"]
+        ]
         task_name = self.__class__.__name__
         branch_names = []
         for branch in branches:
             branch_names.append(name_list[branch])
         branch_str = "|".join(branch_names)
-        config.custom_content.append(
-            ("JobBatchName", f"{task_name}-{branch_str}")
-        )
+        config.custom_content.append(("JobBatchName", f"{task_name}-{branch_str}"))
         return config
 
     # Create map for the branches of this task.
@@ -93,9 +101,17 @@ class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
                 file_list.append(tmp_file)
         if len(file_list) != 1:
             if len(file_list) == 0:
-                print("{}.yaml not found in any dir of {}.".format(identifier, self.process_config_dirs))
+                print(
+                    "{}.yaml not found in any dir of {}.".format(
+                        identifier, self.process_config_dirs
+                    )
+                )
             if len(file_list) > 1:
-                print("{}.yaml found in more than one dir of {}.".format(identifier, self.process_config_dirs))
+                print(
+                    "{}.yaml found in more than one dir of {}.".format(
+                        identifier, self.process_config_dirs
+                    )
+                )
             raise Exception("Incorrect process config file path.")
         else:
             process_config_file = file_list[0]
@@ -120,10 +136,13 @@ class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
             run_location=run_loc,
         )
 
+
 # Task to run NN training (2 folds)
 class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
     # Define luigi parameters
-    training_information = luigi.ListParameter(description="List of, tuples of training name and training config file")
+    training_information = luigi.ListParameter(
+        description="List of, tuples of training name and training config file"
+    )
 
     # Set other variables and templates used by this class.
     file_templates = [
@@ -140,15 +159,17 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
     # Add branch specific names to the HTCondor jobs
     def htcondor_job_config(self, config, job_num, branches):
         config = super(RunTraining, self).htcondor_job_config(config, job_num, branches)
-        name_list = ["_".join([info[0], fold]) for info in self.training_information for fold in ["0","1"]]
+        name_list = [
+            "_".join([info[0], fold])
+            for info in self.training_information
+            for fold in ["0", "1"]
+        ]
         task_name = self.__class__.__name__
         branch_names = []
         for branch in branches:
             branch_names.append(name_list[branch])
         branch_str = "|".join(branch_names)
-        config.custom_content.append(
-            ("JobBatchName", f"{task_name}-{branch_str}")
-        )
+        config.custom_content.append(("JobBatchName", f"{task_name}-{branch_str}"))
         return config
 
     # Create map for the branches of this task
@@ -157,7 +178,7 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
             {
                 "training_information": info,
                 "fold": fold,
-            } 
+            }
             for info in self.training_information
             for fold in ["0", "1"]
         ]
@@ -212,7 +233,9 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
             "process_config_dirs": process_config_dirs,
         }
         requirements = {}
-        requirements["CreateTrainingDataShard"] = CreateTrainingDataShard(**requirements_para)
+        requirements["CreateTrainingDataShard"] = CreateTrainingDataShard(
+            **requirements_para
+        )
         return requirements
 
     def workflow_requires(self):
@@ -221,7 +244,7 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         for training, config_file in self.training_information:
             # Replace prefix from config path
             config_file_rel = config_file.replace(startup_dir, os.getcwd())
-            
+
             # Collect process identification, process, training class and config directory
             with open(config_file_rel, "r") as stream:
                 training_config = yaml.safe_load(stream)
@@ -242,8 +265,10 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         datashard_information = set(file_list)
         # Check for combinations with same id, process and class, but different config_dir
         idp, t_class, files = zip(*datashard_information)
-        if(len(list(zip(idp, t_class))) != len(set(zip(idp, t_class)))):
-            print("Processes with the same identification and training class, but different config dirs found!")
+        if len(list(zip(idp, t_class))) != len(set(zip(idp, t_class))):
+            print(
+                "Processes with the same identification and training class, but different config dirs found!"
+            )
             data_found = []
             for data in datashard_information:
                 id_, t_class, file_ = data
@@ -262,7 +287,9 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
             "process_config_dirs": process_config_dirs,
         }
         requirements = {}
-        requirements["CreateTrainingDataShard"] = CreateTrainingDataShard(**requirements_para)
+        requirements["CreateTrainingDataShard"] = CreateTrainingDataShard(
+            **requirements_para
+        )
         return requirements
 
     # Define output targets. Task is considerd complete if all targets are present.
@@ -289,10 +316,14 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         training_name, config_file = self.branch_data["training_information"]
         inputs = flatten_collections(self.input())
         filtered_inputs = [input_ for input_ in inputs if "_fold0.root" in input_.path]
-        input_dir_list = list(set([os.path.dirname(target.path) for target in filtered_inputs]))
+        input_dir_list = list(
+            set([os.path.dirname(target.path) for target in filtered_inputs])
+        )
         if len(input_dir_list) != 1:
             if len(input_dir_list) == 0:
-                print("Base directory of datashards could not be found from the task inputs.")
+                print(
+                    "Base directory of datashards could not be found from the task inputs."
+                )
             if len(input_dir_list) > 1:
                 print("Base directories of the datashards are not the same.")
             raise Exception("Data directory colud not be determined.")
@@ -324,7 +355,9 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
                 "--output-dir {}".format(out_dir),
             ],
             run_location=run_loc,
-            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+            sourcescript=[
+                "/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"
+            ],
         )
 
         ## Convert model to lwtnn format
@@ -338,28 +371,36 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
                 "--in-out-dir {}".format(out_dir),
             ],
             run_location=run_loc,
-            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+            sourcescript=[
+                "/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"
+            ],
         )
 
         self.run_command(
             command=[
                 "python",
                 "lwtnn/converters/keras2json.py",
-                "{dir}/fold{fold}_keras_architecture.json".format(dir=out_dir, fold=fold),
+                "{dir}/fold{fold}_keras_architecture.json".format(
+                    dir=out_dir, fold=fold
+                ),
                 "{dir}/fold{fold}_keras_variables.json".format(dir=out_dir, fold=fold),
                 "{dir}/fold{fold}_keras_weights.h5".format(dir=out_dir, fold=fold),
                 "> {dir}/fold{fold}_lwtnn.json".format(dir=out_dir, fold=fold),
             ],
             run_location=run_loc,
-            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+            sourcescript=[
+                "/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"
+            ],
         )
 
         # Copy locally created files to remote storage
         out_files = [
-            "/".join([
-                out_dir,
-                file_template.format(fold=fold),
-            ])
+            "/".join(
+                [
+                    out_dir,
+                    file_template.format(fold=fold),
+                ]
+            )
             for file_template in self.file_templates
         ]
 
@@ -373,7 +414,9 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
 # Task test the trained NNs (both folds)
 class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
     # Define luigi parameters
-    training_information = luigi.ListParameter(description="List of, tuples of training name and training config file")
+    training_information = luigi.ListParameter(
+        description="List of, tuples of training name and training config file"
+    )
 
     # Set other variables and templates used by this class.
     file_template = "keras_test_results.tar.gz"
@@ -387,16 +430,13 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         for branch in branches:
             branch_names.append(name_list[branch])
         branch_str = "|".join(branch_names)
-        config.custom_content.append(
-            ("JobBatchName", f"{task_name}-{branch_str}")
-        )
+        config.custom_content.append(("JobBatchName", f"{task_name}-{branch_str}"))
         return config
 
     # Create map for the branches of this task
     def create_branch_map(self):
         branches = [
-            {"training_information": info} 
-            for info in self.training_information
+            {"training_information": info} for info in self.training_information
         ]
         assert (
             branches
@@ -449,10 +489,14 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
             "process_config_dirs": process_config_dirs,
         }
         requirements = {}
-        requirements["CreateTrainingDataShard"] = CreateTrainingDataShard(**requirements_data)
-        requirements_train = {"training_information": [self.branch_data["training_information"]]}
+        requirements["CreateTrainingDataShard"] = CreateTrainingDataShard(
+            **requirements_data
+        )
+        requirements_train = {
+            "training_information": [self.branch_data["training_information"]]
+        }
         requirements["RunTraining"] = RunTraining(**requirements_train)
-        
+
         return requirements
 
     def workflow_requires(self):
@@ -461,7 +505,7 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         for training, config_file in self.training_information:
             # Replace prefix from config path
             config_file_rel = config_file.replace(startup_dir, os.getcwd())
-            
+
             # Collect process identification, process, training class and config directory
             with open(config_file_rel, "r") as stream:
                 training_config = yaml.safe_load(stream)
@@ -482,8 +526,10 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         datashard_information = set(file_list)
         # Check for combinations with same id, process and class, but different config_dir
         idp, t_class, files = zip(*datashard_information)
-        if(len(list(zip(idp, t_class))) != len(set(zip(idp, t_class)))):
-            print("Processes with the same identification and training class, but different config dirs found!")
+        if len(list(zip(idp, t_class))) != len(set(zip(idp, t_class))):
+            print(
+                "Processes with the same identification and training class, but different config dirs found!"
+            )
             data_found = []
             for data in datashard_information:
                 id_, t_class, file_ = data
@@ -502,7 +548,9 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
             "process_config_dirs": process_config_dirs,
         }
         requirements = {}
-        requirements["CreateTrainingDataShard"] = CreateTrainingDataShard(**requirements_data)
+        requirements["CreateTrainingDataShard"] = CreateTrainingDataShard(
+            **requirements_data
+        )
         requirements_train = {"training_information": self.training_information}
         requirements["RunTraining"] = RunTraining(**requirements_train)
         return requirements
@@ -521,18 +569,23 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         run_loc = "sm-htt-analysis"
         training_name, config_file = self.branch_data["training_information"]
         data_inputs = flatten_collections(self.input()["CreateTrainingDataShard"])
-        filtered_data_inputs = [input_ for input_ in data_inputs if "_fold0.root" in input_.path]
-        input_dir_list = list(set([os.path.dirname(target.path) for target in filtered_data_inputs]))
+        filtered_data_inputs = [
+            input_ for input_ in data_inputs if "_fold0.root" in input_.path
+        ]
+        input_dir_list = list(
+            set([os.path.dirname(target.path) for target in filtered_data_inputs])
+        )
         if len(input_dir_list) != 1:
             if len(input_dir_list) == 0:
-                print("Base directory of datashards could not be found from the task inputs.")
+                print(
+                    "Base directory of datashards could not be found from the task inputs."
+                )
             if len(input_dir_list) > 1:
                 print("Base directories of the datashards are not the same.")
             raise Exception("Data directory colud not be determined.")
         else:
             data_dir = self.wlcg_path + input_dir_list[0]
 
-            
         model_inputs = flatten_collections(self.input()["RunTraining"])
         required_files = [
             "fold0_keras_model.h5",
@@ -541,11 +594,9 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
             "fold1_keras_preprocessing.pickle",
         ]
         filtered_model_inputs = [
-            input_ for input_ in model_inputs 
-            if any([
-                name in input_.path 
-                for name in required_files
-            ])
+            input_
+            for input_ in model_inputs
+            if any([name in input_.path for name in required_files])
         ]
 
         in_dir = self.local_path(training_name + "_in")
@@ -577,7 +628,7 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         ## Create confusion matrice plots
         self.run_command(
             command=[
-                "python", 
+                "python",
                 "ml_trainings/keras_confusion_matrix.py",
                 "--config-file {}".format(config_file_rel),
                 "--training-name {}".format(training_name),
@@ -586,7 +637,9 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
                 "--output-dir {}".format(store_dir),
             ],
             run_location=run_loc,
-            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+            sourcescript=[
+                "/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"
+            ],
         )
 
         ## Create 1D taylor coefficient plots
@@ -601,7 +654,9 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
                 "--output-dir {}".format(store_dir),
             ],
             run_location=run_loc,
-            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+            sourcescript=[
+                "/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"
+            ],
         )
 
         ## Create taylor ranking plots
@@ -616,20 +671,24 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
                 "--output-dir {}".format(store_dir),
             ],
             run_location=run_loc,
-            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+            sourcescript=[
+                "/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"
+            ],
         )
 
         ## Tar plots together
         # Split path at second to last slash
         dir_path = "/".join(store_dir.split("/")[:-2])
         dir_name = "/".join(store_dir.split("/")[-2:])
-        self.run_command(command=[
-            "tar",
-            "-czf",
-            os.path.join(out_dir, self.file_template),
-            "-C {}".format(dir_path),
-            dir_name,
-        ])
+        self.run_command(
+            command=[
+                "tar",
+                "-czf",
+                os.path.join(out_dir, self.file_template),
+                "-C {}".format(dir_path),
+                dir_name,
+            ]
+        )
 
         # Copy locally created files to remote storage
         out_file = os.path.join(out_dir, self.file_template)
@@ -657,13 +716,17 @@ class RunAllAnalysisTrainings(WrapperTask):
             trainings.append(config["training"])
             trainings_configs.append(config["trainings_config"])
         # Only keep unique combinations
-        training_information = list(set(zip(
-            trainings,
-            trainings_configs,
-        )))
+        training_information = list(
+            set(
+                zip(
+                    trainings,
+                    trainings_configs,
+                )
+            )
+        )
         # Check if there are trainings with the same name from different files
         t_names, paths = zip(*training_information)
-        if(len(t_names) != len(set(t_names))):
+        if len(t_names) != len(set(t_names)):
             print("Trainings with the same name, but different config paths found!")
             data_found = []
             for data in training_information:
@@ -673,7 +736,7 @@ class RunAllAnalysisTrainings(WrapperTask):
                 else:
                     data_found.append(t_name)
             raise Exception("Consistency error in analysis config.")
-        # Require trainings for all found training names 
+        # Require trainings for all found training names
         requirements = {}
         parameters = {"training_information": training_information}
         requirements["RunTraining"] = RunTraining(**parameters)
