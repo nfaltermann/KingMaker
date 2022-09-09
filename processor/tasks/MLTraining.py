@@ -121,15 +121,11 @@ class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
         )
 
 # Task to run NN training (2 folds)
-# One training is performed for each valid combination of:
-# channel, mass, batch and fold
-# The datashards are combined based on the training parameters
 class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
     # Define luigi parameters
     training_information = luigi.ListParameter(description="List of, tuples of training name and training config file")
 
     # Set other variables and templates used by this class.
-    file_template_shard = "{identifier}_{training_class}_datashard_fold{fold}.root"
     file_templates = [
         "fold{fold}_keras_model.h5",
         "fold{fold}_keras_preprocessing.pickle",
@@ -182,6 +178,9 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
 
         training, config_file = self.branch_data["training_information"]
 
+        if not startup_dir in config_file:
+            print("{} not in {}.".format(startup_dir, config_file))
+            raise Exception("Mismatch between current dir and training config dir.")
         # Replace prefix from config path
         config_file_rel = config_file.replace(startup_dir, os.getcwd())
 
@@ -278,6 +277,7 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
             )
             for file_template in self.file_templates
         ]
+        # print([self.wlcg_path + file_ for file_ in files])
         targets = self.remote_targets(files)
         for target in targets:
             target.parent.touch()
@@ -370,6 +370,277 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         console.log("File copy out end.")
 
 
+# Task test the trained NNs (both folds)
+class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
+    # Define luigi parameters
+    training_information = luigi.ListParameter(description="List of, tuples of training name and training config file")
+
+    # Set other variables and templates used by this class.
+    file_template = "keras_test_results.tar.gz"
+
+    # Add branch specific names to the HTCondor jobs
+    def htcondor_job_config(self, config, job_num, branches):
+        config = super(RunTesting, self).htcondor_job_config(config, job_num, branches)
+        name_list = [info[0] for info in self.training_information]
+        task_name = self.__class__.__name__
+        branch_names = []
+        for branch in branches:
+            branch_names.append(name_list[branch])
+        branch_str = "|".join(branch_names)
+        config.custom_content.append(
+            ("JobBatchName", f"{task_name}-{branch_str}")
+        )
+        return config
+
+    # Create map for the branches of this task
+    def create_branch_map(self):
+        branches = [
+            {"training_information": info} 
+            for info in self.training_information
+        ]
+        assert (
+            branches
+        ), "There are no valid branches for this set of parameters: \
+            \n{}".format(
+            self
+        )
+        return branches
+
+    # Set prerequisites of this task:
+    # All dataset shards have to be completed
+    # All training config files have to be completed
+    # The prerequisites are also dependant on whether all_eras is used
+    def requires(self):
+        # For the requested training branch
+
+        training, config_file = self.branch_data["training_information"]
+
+        if not startup_dir in config_file:
+            print("{} not in {}.".format(startup_dir, config_file))
+            raise Exception("Mismatch between current dir and training config dir.")
+        # Replace prefix from config path
+        config_file_rel = config_file.replace(startup_dir, os.getcwd())
+
+        # Collect process identification, process, training class and config directory
+        with open(config_file_rel, "r") as stream:
+            training_config = yaml.safe_load(stream)
+        conf = get_merged_config(training_config, training)
+        ids = list(conf["parts"].keys())
+        p_d = list(conf["parts"].values())
+        processes = conf["processes"]
+        mapped_classes = [conf["mapping"][proc] for proc in processes]
+        file_list = []
+        for id_, path in zip(ids, p_d):
+            for process in processes:
+                mapped_class = conf["mapping"][process]
+                id_process = "{id}_{process}".format(
+                    id=id_,
+                    process=process,
+                )
+                file_list.append((id_process, mapped_class, path))
+        idp, t_class, files = zip(*set(file_list))
+        # Require Dataset-shards for all found process-training class combinations
+        # List of identifier and training_class tuples
+        datashard_information = list(zip(idp, t_class))
+        # List of unique process config dirs
+        process_config_dirs = list(set(files))
+        requirements_data = {
+            "datashard_information": datashard_information,
+            "process_config_dirs": process_config_dirs,
+        }
+        requirements = {}
+        requirements["CreateTrainingDataShard"] = CreateTrainingDataShard(**requirements_data)
+        requirements_train = {"training_information": [self.branch_data["training_information"]]}
+        requirements["RunTraining"] = RunTraining(**requirements_train)
+        
+        return requirements
+
+    def workflow_requires(self):
+        file_list = []
+        # For each requested training
+        for training, config_file in self.training_information:
+            # Replace prefix from config path
+            config_file_rel = config_file.replace(startup_dir, os.getcwd())
+            
+            # Collect process identification, process, training class and config directory
+            with open(config_file_rel, "r") as stream:
+                training_config = yaml.safe_load(stream)
+            conf = get_merged_config(training_config, training)
+            ids = list(conf["parts"].keys())
+            p_d = list(conf["parts"].values())
+            processes = conf["processes"]
+            mapped_classes = [conf["mapping"][proc] for proc in processes]
+            for id_, path in zip(ids, p_d):
+                for process in processes:
+                    mapped_class = conf["mapping"][process]
+                    id_process = "{id}_{process}".format(
+                        id=id_,
+                        process=process,
+                    )
+                    file_list.append((id_process, mapped_class, path))
+        # Only keep unique combinations
+        datashard_information = set(file_list)
+        # Check for combinations with same id, process and class, but different config_dir
+        idp, t_class, files = zip(*datashard_information)
+        if(len(list(zip(idp, t_class))) != len(set(zip(idp, t_class)))):
+            print("Processes with the same identification and training class, but different config dirs found!")
+            data_found = []
+            for data in datashard_information:
+                id_, t_class, file_ = data
+                if (id_, t_class) in data_found:
+                    print("Process {} is affected.".format((id_, t_class)))
+                else:
+                    data_found.append((id_, t_class))
+            raise Exception("Consistency error in training config.")
+        # Require Dataset-shards for all found process-training class combinations
+        # List of identifier and training_class tuples
+        datashard_information = list(zip(idp, t_class))
+        # List of unique process config dirs
+        process_config_dirs = list(set(files))
+        requirements_data = {
+            "datashard_information": datashard_information,
+            "process_config_dirs": process_config_dirs,
+        }
+        requirements = {}
+        requirements["CreateTrainingDataShard"] = CreateTrainingDataShard(**requirements_data)
+        requirements_train = {"training_information": self.training_information}
+        requirements["RunTraining"] = RunTraining(**requirements_train)
+        return requirements
+
+    # Define output targets. Task is considerd complete if all targets are present.
+    def output(self):
+        t_name, t_file = self.branch_data["training_information"]
+        file_ = "/".join([t_name, self.file_template])
+        # print([self.wlcg_path + file_ for file_ in files])
+        # print(file_)
+        target = self.remote_target(file_)
+        target.parent.touch()
+        return target
+
+    def run(self):
+        run_loc = "sm-htt-analysis"
+        training_name, config_file = self.branch_data["training_information"]
+        data_inputs = flatten_collections(self.input()["CreateTrainingDataShard"])
+        filtered_data_inputs = [input_ for input_ in data_inputs if "_fold0.root" in input_.path]
+        input_dir_list = list(set([os.path.dirname(target.path) for target in filtered_data_inputs]))
+        if len(input_dir_list) != 1:
+            if len(input_dir_list) == 0:
+                print("Base directory of datashards could not be found from the task inputs.")
+            if len(input_dir_list) > 1:
+                print("Base directories of the datashards are not the same.")
+            raise Exception("Data directory colud not be determined.")
+        else:
+            data_dir = self.wlcg_path + input_dir_list[0]
+
+            
+        model_inputs = flatten_collections(self.input()["RunTraining"])
+        required_files = [
+            "fold0_keras_model.h5",
+            "fold1_keras_model.h5",
+            "fold0_keras_preprocessing.pickle",
+            "fold1_keras_preprocessing.pickle",
+        ]
+        filtered_model_inputs = [
+            input_ for input_ in model_inputs 
+            if any([
+                name in input_.path 
+                for name in required_files
+            ])
+        ]
+
+        in_dir = self.local_path(training_name + "_in")
+        os.makedirs(in_dir, exist_ok=True)
+        print("Copy in start")
+        for target in filtered_model_inputs:
+            filename = os.path.basename(target.path)
+            full_path = os.path.join(in_dir, filename)
+            target.copy_to_local(full_path)
+            print(target, in_dir)
+        print("Copy in end")
+
+        out_dir = self.local_path(training_name)
+        os.makedirs(out_dir, exist_ok=True)
+
+        store_dir = os.path.join(out_dir, "plots")
+        os.makedirs(store_dir, exist_ok=True)
+
+        # Replace prefix from config path
+        config_file_rel = config_file.replace(startup_dir, os.getcwd())
+
+        # Set maximum number of threads (this number is somewhat inaccurate
+        # as TensorFlow only abides by it for some aspects of the training)
+        if os.getenv("OMP_NUM_THREADS"):
+            max_threads = os.getenv("OMP_NUM_THREADS")
+        else:
+            max_threads = 1
+
+        ## Create confusion matrice plots
+        self.run_command(
+            command=[
+                "python", 
+                "ml_trainings/keras_confusion_matrix.py",
+                "--config-file {}".format(config_file_rel),
+                "--training-name {}".format(training_name),
+                "--data-dir {}".format(data_dir),
+                "--model-dir {}".format(in_dir),
+                "--output-dir {}".format(store_dir),
+            ],
+            run_location=run_loc,
+            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+        )
+
+        ## Create 1D taylor coefficient plots
+        self.run_command(
+            command=[
+                "python",
+                "ml_trainings/keras_taylor_1D.py",
+                "--config-file {}".format(config_file_rel),
+                "--training-name {}".format(training_name),
+                "--data-dir {}".format(data_dir),
+                "--model-dir {}".format(in_dir),
+                "--output-dir {}".format(store_dir),
+            ],
+            run_location=run_loc,
+            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+        )
+
+        ## Create taylor ranking plots
+        self.run_command(
+            command=[
+                "python",
+                "ml_trainings/keras_taylor_ranking.py",
+                "--config-file {}".format(config_file_rel),
+                "--training-name {}".format(training_name),
+                "--data-dir {}".format(data_dir),
+                "--model-dir {}".format(in_dir),
+                "--output-dir {}".format(store_dir),
+            ],
+            run_location=run_loc,
+            sourcescript=["/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate ML_LAW"]
+        )
+
+        ## Tar plots together
+        # Split path at second to last slash
+        dir_path = "/".join(store_dir.split("/")[:-2])
+        dir_name = "/".join(store_dir.split("/")[-2:])
+        self.run_command(command=[
+            "tar",
+            "-czf",
+            os.path.join(out_dir, self.file_template),
+            "-C {}".format(dir_path),
+            dir_name,
+        ])
+
+        # Copy locally created files to remote storage
+        out_file = os.path.join(out_dir, self.file_template)
+
+        console.log("File copy out start.")
+        file_remote = self.output()
+        file_remote.parent.touch()
+        file_remote.copy_from_local(out_file)
+        console.log("File copy out end.")
+
+
 # Wrapper task to call all trainings specified in an analysis file
 class RunAllAnalysisTrainings(WrapperTask):
     analysis_config = luigi.Parameter(description="Path to analysis config file")
@@ -406,4 +677,5 @@ class RunAllAnalysisTrainings(WrapperTask):
         requirements = {}
         parameters = {"training_information": training_information}
         requirements["RunTraining"] = RunTraining(**parameters)
+        requirements["RunTesting"] = RunTesting(**parameters)
         return requirements
