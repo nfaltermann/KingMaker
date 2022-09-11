@@ -15,7 +15,7 @@ from itertools import compress
 from law.target.collection import flatten_collections, NestedSiblingFileCollection
 from law.task.base import WrapperTask
 from ast import literal_eval
-from ml_trainings.Config_merger import get_merged_config
+from ml_util.config_merger import get_merged_config
 import re
 
 try:
@@ -126,7 +126,7 @@ class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
             [
                 "ROOT_XRD_QUERY_READV_PARAMS=0",
                 "python",
-                "ml_trainings/create_training_datashard.py",
+                "ml_datasets/create_training_datashard.py",
                 "--identifier {}".format(identifier),
                 "--config {}".format(process_config_file),
                 "--fold {}".format(fold),
@@ -569,22 +569,23 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         run_loc = "sm-htt-analysis"
         training_name, config_file = self.branch_data["training_information"]
         data_inputs = flatten_collections(self.input()["CreateTrainingDataShard"])
+        # Filter for ".root" files in inputs
         filtered_data_inputs = [
-            input_ for input_ in data_inputs if "_fold0.root" in input_.path
+            input_ for input_ in data_inputs if ".root" in input_.path
         ]
-        input_dir_list = list(
-            set([os.path.dirname(target.path) for target in filtered_data_inputs])
-        )
-        if len(input_dir_list) != 1:
-            if len(input_dir_list) == 0:
-                print(
-                    "Base directory of datashards could not be found from the task inputs."
-                )
-            if len(input_dir_list) > 1:
-                print("Base directories of the datashards are not the same.")
-            raise Exception("Data directory colud not be determined.")
-        else:
-            data_dir = self.wlcg_path + input_dir_list[0]
+        # input_dir_list = list(
+        #     set([os.path.dirname(target.path) for target in filtered_data_inputs])
+        # )
+        # if len(input_dir_list) != 1:
+        #     if len(input_dir_list) == 0:
+        #         print(
+        #             "Base directory of datashards could not be found from the task inputs."
+        #         )
+        #     if len(input_dir_list) > 1:
+        #         print("Base directories of the datashards are not the same.")
+        #     raise Exception("Data directory colud not be determined.")
+        # else:
+        #     data_dir = self.wlcg_path + input_dir_list[0]
 
         model_inputs = flatten_collections(self.input()["RunTraining"])
         required_files = [
@@ -602,11 +603,13 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         in_dir = self.local_path(training_name + "_in")
         os.makedirs(in_dir, exist_ok=True)
         print("Copy in start")
-        for target in filtered_model_inputs:
+        for target in filtered_model_inputs + filtered_data_inputs:
             filename = os.path.basename(target.path)
             full_path = os.path.join(in_dir, filename)
             target.copy_to_local(full_path)
-            print(target, in_dir)
+            print("Copy {}".format(target))
+        print("to {}".format(in_dir))
+        print("Content of {}: {}".format(in_dir, os.listdir(in_dir)))
         print("Copy in end")
 
         out_dir = self.local_path(training_name)
@@ -629,10 +632,10 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         self.run_command(
             command=[
                 "python",
-                "ml_trainings/keras_confusion_matrix.py",
+                "ml_tests/keras_confusion_matrix.py",
                 "--config-file {}".format(config_file_rel),
                 "--training-name {}".format(training_name),
-                "--data-dir {}".format(data_dir),
+                "--data-dir {}".format(in_dir),
                 "--model-dir {}".format(in_dir),
                 "--output-dir {}".format(store_dir),
             ],
@@ -646,10 +649,10 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         self.run_command(
             command=[
                 "python",
-                "ml_trainings/keras_taylor_1D.py",
+                "ml_tests/keras_taylor_1D.py",
                 "--config-file {}".format(config_file_rel),
                 "--training-name {}".format(training_name),
-                "--data-dir {}".format(data_dir),
+                "--data-dir {}".format(in_dir),
                 "--model-dir {}".format(in_dir),
                 "--output-dir {}".format(store_dir),
             ],
@@ -663,10 +666,10 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         self.run_command(
             command=[
                 "python",
-                "ml_trainings/keras_taylor_ranking.py",
+                "ml_tests/keras_taylor_ranking.py",
                 "--config-file {}".format(config_file_rel),
                 "--training-name {}".format(training_name),
-                "--data-dir {}".format(data_dir),
+                "--data-dir {}".format(in_dir),
                 "--model-dir {}".format(in_dir),
                 "--output-dir {}".format(store_dir),
             ],
