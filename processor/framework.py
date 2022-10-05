@@ -320,7 +320,6 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
         logdir = os.path.join(
             os.path.dirname(job_file_dir), "logs", self.production_tag
         )
-        print(logdir)
         for file_ in ["Log", "Output", "Error"]:
             os.makedirs(os.path.join(logdir, file_), exist_ok=True)
         logfile = os.path.join(
