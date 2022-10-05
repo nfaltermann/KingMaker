@@ -11,6 +11,7 @@ from law.contrib.htcondor.job import HTCondorJobManager
 from tempfile import mkdtemp
 from getpass import getuser
 from law.target.collection import flatten_collections
+from law.config import Config
 
 law.contrib.load("wlcg")
 law.contrib.load("htcondor")
@@ -209,7 +210,9 @@ class Task(law.Task):
             logstring = "Running {}".format(command)
             if run_location:
                 logstring += " from {}".format(run_location)
+            console.rule()
             console.log(logstring)
+            console.rule()
             p = Popen(
                 " ".join(command),
                 shell=True,
@@ -235,6 +238,7 @@ class Task(law.Task):
 
                 if p.poll() != None:
                     break
+            console.rule()
         else:
             raise Exception("No command provided.")
 
@@ -311,17 +315,27 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
     def htcondor_job_config(self, config, job_num, branches):
         analysis_name = os.getenv("ANA_NAME")
         task_name = self.__class__.__name__
-        analysis_path = os.getenv("ANALYSIS_PATH")
+        _cfg = Config.instance()
+        job_file_dir = _cfg.get_expanded("job", "job_file_dir")
+        logdir = os.path.join(os.path.dirname(job_file_dir), "logs", self.production_tag)
+        print(logdir)
+        for file_ in ["Log", "Output", "Error"]:
+            os.makedirs(os.path.join(logdir, file_), exist_ok=True)
+        logfile = os.path.join(logdir, "Log", "{}_{}to{}.txt".format(task_name, branches[0], branches[-1]))
+        outfile = os.path.join(logdir, "Output", "{}_{}to{}.txt".format(task_name, branches[0], branches[-1]))
+        errfile = os.path.join(logdir, "Error", "{}_{}to{}.txt".format(task_name, branches[0], branches[-1]))
+
         # Write job config file
         config.custom_content = []
         config.custom_content.append(
             ("accounting_group", self.htcondor_accounting_group)
         )
-        # config.custom_content.append(("Log", "log_{}to{}.txt".format(branches[0], branches[-1]))) #
-        # config.custom_content.append(("stream_output", "True")) #
-        # config.custom_content.append(("Output", "out_{}to{}.txt".format(branches[0], branches[-1]))) #Remove before commit
-        # config.custom_content.append(("stream_error", "True")) #
-        # config.custom_content.append(("Output", "err_{}to{}.txt".format(branches[0], branches[-1]))) #
+        config.custom_content.append(("Log", logfile))
+        config.custom_content.append(("Output", outfile))
+        config.custom_content.append(("Error", errfile))
+        
+        config.custom_content.append(("stream_error", "True")) #Remove before commit
+        config.custom_content.append(("stream_output", "True")) #
         if self.htcondor_requirements:
             config.custom_content.append(("Requirements", self.htcondor_requirements))
         config.custom_content.append(("+RemoteJob", self.htcondor_remote_job))
