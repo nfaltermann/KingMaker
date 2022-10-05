@@ -104,7 +104,6 @@ class Task(law.Task):
             targets.append(law.wlcg.WLCGFileTarget(path=self.remote_path(path)))
         return targets
 
-
     def convert_env_to_dict(self, env):
         my_env = {}
         for line in env.splitlines():
@@ -242,6 +241,7 @@ class Task(law.Task):
         else:
             raise Exception("No command provided.")
 
+
 class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
     ENV_NAME = luigi.Parameter(description="Environment to be used in HTCondor job.")
     htcondor_accounting_group = luigi.Parameter(
@@ -317,13 +317,25 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
         task_name = self.__class__.__name__
         _cfg = Config.instance()
         job_file_dir = _cfg.get_expanded("job", "job_file_dir")
-        logdir = os.path.join(os.path.dirname(job_file_dir), "logs", self.production_tag)
+        logdir = os.path.join(
+            os.path.dirname(job_file_dir), "logs", self.production_tag
+        )
         print(logdir)
         for file_ in ["Log", "Output", "Error"]:
             os.makedirs(os.path.join(logdir, file_), exist_ok=True)
-        logfile = os.path.join(logdir, "Log", "{}_{}to{}.txt".format(task_name, branches[0], branches[-1]))
-        outfile = os.path.join(logdir, "Output", "{}_{}to{}.txt".format(task_name, branches[0], branches[-1]))
-        errfile = os.path.join(logdir, "Error", "{}_{}to{}.txt".format(task_name, branches[0], branches[-1]))
+        logfile = os.path.join(
+            logdir, "Log", "{}_{}to{}.txt".format(task_name, branches[0], branches[-1])
+        )
+        outfile = os.path.join(
+            logdir,
+            "Output",
+            "{}_{}to{}.txt".format(task_name, branches[0], branches[-1]),
+        )
+        errfile = os.path.join(
+            logdir,
+            "Error",
+            "{}_{}to{}.txt".format(task_name, branches[0], branches[-1]),
+        )
 
         # Write job config file
         config.custom_content = []
@@ -333,9 +345,9 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
         config.custom_content.append(("Log", logfile))
         config.custom_content.append(("Output", outfile))
         config.custom_content.append(("Error", errfile))
-        
-        config.custom_content.append(("stream_error", "True")) #Remove before commit
-        config.custom_content.append(("stream_output", "True")) #
+
+        config.custom_content.append(("stream_error", "True"))  # Remove before commit
+        config.custom_content.append(("stream_output", "True"))  #
         if self.htcondor_requirements:
             config.custom_content.append(("Requirements", self.htcondor_requirements))
         config.custom_content.append(("+RemoteJob", self.htcondor_remote_job))
