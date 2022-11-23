@@ -118,13 +118,13 @@ The ML_train workflow currently contains a number of the tasks necessary for the
 The tasks , located in are:
 
 1. [CreateTrainingDataShard](processor/tasks/MLTraining.py#L30)
-    Remote workflow task that creates the process-datasets for the machine learning tasks from the config files you provide. The task uses the `ntuples` and `friend trees` described in the [Sample setup](sm-htt-analysis/utils/setup_samples.sh). These dependencies are currently not checked by LAW. Also uses the [create_training_datashard](sm-htt-analysis/ml_datasets/create_training_datashard.py) script. \
+    Remote workflow task that creates the process-datasets for the machine learning tasks from the config files you provide. The task uses the `ntuples` and `friend trees` described in the [Sample setup](https://github.com/tvoigtlaender/sm-htt-analysis/tree/master/utils/setup_samples.sh). These dependencies are currently not checked by LAW. Also uses the [create_training_datashard](https://github.com/tvoigtlaender/sm-htt-analysis/tree/master/ml_datasets/create_training_datashard.py) script. \
     The task branches each return a root file that consists of one fold of one of the processes described in the provided configs. These files can then be used for the machine learning tasks.
 2. [RunTraining](processor/tasks/MLTraining.py#L141)
-    Remote workflow task that performs the neural network training using GPU resources if possible. Uses the [Tensorflow_training](sm-htt-analysis/ml_trainings/Tensorflow_training.py) script. The hyperparameters of this training are set by the provided config files.\
+    Remote workflow task that performs the neural network training using GPU resources if possible. Uses the [Tensorflow_training](https://github.com/tvoigtlaender/sm-htt-analysis/tree/master/ml_trainings/Tensorflow_training.py) script. The hyperparameters of this training are set by the provided config files.\
     Each branch task returns a set of files for one fold of one training specified in the configs. Each set includes the trained `.h5` model, the preprocessing object as a `.pickle` file and a graph of the loss as a `.pdf` and `.png`. The task also returns a set of files that can be used with the [lwtnn](https://github.com/lwtnn/lwtnn) package.
 3. [RunTesting](processor/tasks/MLTraining.py#L415)
-    Remote workflow task that performs a number of tests on the trained neural network using GPU resources if possible. Uses the [ml_tests](sm-htt-analysis/ml_tests) scripts. The tests return a number plots and their `.json` files in a tarball, which is copied to the remote storage. The plots include confusion, efficiency, purity, 1D-taylor and taylor ranking.
+    Remote workflow task that performs a number of tests on the trained neural network using GPU resources if possible. Uses the [ml_tests](https://github.com/tvoigtlaender/sm-htt-analysis/tree/master/ml_tests) scripts. The tests return a number plots and their `.json` files in a tarball, which is copied to the remote storage. The plots include confusion, efficiency, purity, 1D-taylor and taylor ranking.
 5. [RunAllAnalysisTrainings](processor/tasks/RunTraining.py#L707)
     Task to run all trainings described in the configs.
 
