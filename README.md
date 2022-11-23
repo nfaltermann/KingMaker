@@ -125,7 +125,7 @@ The tasks , located in are:
     Each branch task returns a set of files for one fold of one training specified in the configs. Each set includes the trained `.h5` model, the preprocessing object as a `.pickle` file and a graph of the loss as a `.pdf` and `.png`. The task also returns a set of files that can be used with the [lwtnn](https://github.com/lwtnn/lwtnn) package.
 3. [RunTesting](processor/tasks/MLTraining.py#L415)
     Remote workflow task that performs a number of tests on the trained neural network using GPU resources if possible. Uses the [ml_tests](https://github.com/tvoigtlaender/sm-htt-analysis/tree/master/ml_tests) scripts. The tests return a number plots and their `.json` files in a tarball, which is copied to the remote storage. The plots include confusion, efficiency, purity, 1D-taylor and taylor ranking.
-5. [RunAllAnalysisTrainings](processor/tasks/RunTraining.py#L707)
+5. [RunAllAnalysisTrainings](processor/tasks/MLTraining.py#L707)
     Task to run all trainings described in the configs.
 
 ## Run ML_train
