@@ -41,7 +41,7 @@ action(){
     else
         # Copy tarballs 
         (
-            source /cvmfs/etp.kit.edu/LAW_envs/KingMaker/bin/activate
+            source /cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate KingMaker
             echo "xrdcp {{TARBALL_PATH}} ${SPAWNPOINT}"
             xrdcp {{TARBALL_PATH}} ${SPAWNPOINT}
             echo "xrdcp {{TARBALL_ENV_PATH}} ${SPAWNPOINT}"

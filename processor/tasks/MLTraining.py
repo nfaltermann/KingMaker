@@ -8,15 +8,11 @@ import yaml
 import os
 import luigi
 import law
-from shutil import rmtree
 from rich.console import Console
 from framework import Task, HTCondorWorkflow, startup_dir
-from itertools import compress
-from law.target.collection import flatten_collections, NestedSiblingFileCollection
+from law.target.collection import flatten_collections
 from law.task.base import WrapperTask
-from ast import literal_eval
 from ml_util.config_merger import get_merged_config
-import re
 
 try:
     current_width = os.get_terminal_size().columns
@@ -96,7 +92,7 @@ class CreateTrainingDataShard(HTCondorWorkflow, law.LocalWorkflow):
 
         file_list = []
         for directory in self.process_config_dirs:
-            tmp_file = "{}/{}.yaml".format(directory, identifier)
+            tmp_file = "{}/{}/{}.yaml".format(os.getcwd(), directory, identifier)
             if os.path.exists(tmp_file):
                 file_list.append(tmp_file)
         if len(file_list) != 1:
@@ -196,23 +192,15 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
     # The prerequisites are also dependant on whether all_eras is used
     def requires(self):
         # For the requested training branch
-
         training, config_file = self.branch_data["training_information"]
 
-        if not startup_dir in config_file:
-            print("{} not in {}.".format(startup_dir, config_file))
-            raise Exception("Mismatch between current dir and training config dir.")
-        # Replace prefix from config path
-        config_file_rel = config_file.replace(startup_dir, os.getcwd())
-
         # Collect process identification, process, training class and config directory
-        with open(config_file_rel, "r") as stream:
+        with open(config_file, "r") as stream:
             training_config = yaml.safe_load(stream)
         conf = get_merged_config(training_config, training)
         ids = list(conf["parts"].keys())
         p_d = list(conf["parts"].values())
         processes = conf["processes"]
-        mapped_classes = [conf["mapping"][proc] for proc in processes]
         file_list = []
         for id_, path in zip(ids, p_d):
             for process in processes:
@@ -226,8 +214,10 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         # Require Dataset-shards for all found process-training class combinations
         # List of identifier and training_class tuples
         datashard_information = list(zip(idp, t_class))
-        # List of unique process config dirs
-        process_config_dirs = list(set(files))
+        # List of unique process config dirs (relative path)
+        process_config_dirs = [
+            string.replace("{}/".format(startup_dir), "") for string in list(set(files))
+        ]
         requirements_para = {
             "datashard_information": datashard_information,
             "process_config_dirs": process_config_dirs,
@@ -242,11 +232,8 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         file_list = []
         # For each requested training
         for training, config_file in self.training_information:
-            # Replace prefix from config path
-            config_file_rel = config_file.replace(startup_dir, os.getcwd())
-
             # Collect process identification, process, training class and config directory
-            with open(config_file_rel, "r") as stream:
+            with open(config_file, "r") as stream:
                 training_config = yaml.safe_load(stream)
             conf = get_merged_config(training_config, training)
             ids = list(conf["parts"].keys())
@@ -280,8 +267,10 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         # Require Dataset-shards for all found process-training class combinations
         # List of identifier and training_class tuples
         datashard_information = list(zip(idp, t_class))
-        # List of unique process config dirs
-        process_config_dirs = list(set(files))
+        # List of unique process config dirs (relative path)
+        process_config_dirs = [
+            string.replace("{}/".format(startup_dir), "") for string in list(set(files))
+        ]
         requirements_para = {
             "datashard_information": datashard_information,
             "process_config_dirs": process_config_dirs,
@@ -314,6 +303,7 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         fold = self.branch_data["fold"]
         run_loc = "sm-htt-analysis"
         training_name, config_file = self.branch_data["training_information"]
+        config_file_abs = "{}/{}".format(os.getcwd(), config_file)
         inputs = flatten_collections(self.input())
         filtered_inputs = [input_ for input_ in inputs if "_fold0.root" in input_.path]
         input_dir_list = list(
@@ -333,22 +323,13 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
         out_dir = self.local_path(training_name)
         os.makedirs(out_dir, exist_ok=True)
 
-        # Replace prefix from config path
-        config_file_rel = config_file.replace(startup_dir, os.getcwd())
-
-        # Set maximum number of threads (this number is somewhat inaccurate
-        # as TensorFlow only abides by it for some aspects of the training)
-        if os.getenv("OMP_NUM_THREADS"):
-            max_threads = os.getenv("OMP_NUM_THREADS")
-        else:
-            max_threads = 12
         # Run NN training and save the model,
         # the preprocessing object and some images of the trasining process
         self.run_command(
             command=[
                 "python",
                 "ml_trainings/Tensorflow_training.py",
-                "--config-file {}".format(config_file_rel),
+                "--config-file {}".format(config_file_abs),
                 "--training-name {}".format(training_name),
                 "--data-dir {}".format(data_dir),
                 "--fold {}".format(fold),
@@ -365,7 +346,7 @@ class RunTraining(HTCondorWorkflow, law.LocalWorkflow):
             command=[
                 "python",
                 "ml_trainings/export_keras_to_json.py",
-                "--training-config {}".format(config_file_rel),
+                "--training-config {}".format(config_file_abs),
                 "--training-name {}".format(training_name),
                 "--fold {}".format(fold),
                 "--in-out-dir {}".format(out_dir),
@@ -455,14 +436,8 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
 
         training, config_file = self.branch_data["training_information"]
 
-        if not startup_dir in config_file:
-            print("{} not in {}.".format(startup_dir, config_file))
-            raise Exception("Mismatch between current dir and training config dir.")
-        # Replace prefix from config path
-        config_file_rel = config_file.replace(startup_dir, os.getcwd())
-
         # Collect process identification, process, training class and config directory
-        with open(config_file_rel, "r") as stream:
+        with open(config_file, "r") as stream:
             training_config = yaml.safe_load(stream)
         conf = get_merged_config(training_config, training)
         ids = list(conf["parts"].keys())
@@ -503,11 +478,8 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         file_list = []
         # For each requested training
         for training, config_file in self.training_information:
-            # Replace prefix from config path
-            config_file_rel = config_file.replace(startup_dir, os.getcwd())
-
             # Collect process identification, process, training class and config directory
-            with open(config_file_rel, "r") as stream:
+            with open(config_file, "r") as stream:
                 training_config = yaml.safe_load(stream)
             conf = get_merged_config(training_config, training)
             ids = list(conf["parts"].keys())
@@ -568,6 +540,7 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
     def run(self):
         run_loc = "sm-htt-analysis"
         training_name, config_file = self.branch_data["training_information"]
+        config_file_abs = "{}/{}".format(os.getcwd(), config_file)
         data_inputs = flatten_collections(self.input()["CreateTrainingDataShard"])
         # Filter for ".root" files in inputs
         filtered_data_inputs = [
@@ -618,22 +591,12 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
         store_dir = os.path.join(out_dir, "plots")
         os.makedirs(store_dir, exist_ok=True)
 
-        # Replace prefix from config path
-        config_file_rel = config_file.replace(startup_dir, os.getcwd())
-
-        # Set maximum number of threads (this number is somewhat inaccurate
-        # as TensorFlow only abides by it for some aspects of the training)
-        if os.getenv("OMP_NUM_THREADS"):
-            max_threads = os.getenv("OMP_NUM_THREADS")
-        else:
-            max_threads = 1
-
         ## Create confusion matrice plots
         self.run_command(
             command=[
                 "python",
                 "ml_tests/keras_confusion_matrix.py",
-                "--config-file {}".format(config_file_rel),
+                "--config-file {}".format(config_file_abs),
                 "--training-name {}".format(training_name),
                 "--data-dir {}".format(in_dir),
                 "--model-dir {}".format(in_dir),
@@ -650,7 +613,7 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
             command=[
                 "python",
                 "ml_tests/keras_taylor_1D.py",
-                "--config-file {}".format(config_file_rel),
+                "--config-file {}".format(config_file_abs),
                 "--training-name {}".format(training_name),
                 "--data-dir {}".format(in_dir),
                 "--model-dir {}".format(in_dir),
@@ -667,7 +630,7 @@ class RunTesting(HTCondorWorkflow, law.LocalWorkflow):
             command=[
                 "python",
                 "ml_tests/keras_taylor_ranking.py",
-                "--config-file {}".format(config_file_rel),
+                "--config-file {}".format(config_file_abs),
                 "--training-name {}".format(training_name),
                 "--data-dir {}".format(in_dir),
                 "--model-dir {}".format(in_dir),
@@ -718,6 +681,12 @@ class RunAllAnalysisTrainings(WrapperTask):
             config = analysis_config[combined_training]
             trainings.append(config["training"])
             trainings_configs.append(config["trainings_config"])
+        # Get relative path of training config
+        trainings_configs = [
+            string.replace("{}/".format(startup_dir), "")
+            for string in trainings_configs
+        ]
+
         # Only keep unique combinations
         training_information = list(
             set(

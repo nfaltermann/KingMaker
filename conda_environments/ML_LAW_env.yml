@@ -1,4 +1,3 @@
-name: ML_LAW
 channels:
   - conda-forge
   - intel
