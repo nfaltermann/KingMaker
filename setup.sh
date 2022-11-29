@@ -11,7 +11,7 @@ action() {
     fi
 
     # Check if current machine is an etp portal machine.
-    PORTAL_LIST=("bms1.etp.kit.edu" "bms2.etp.kit.edu" "bms3.etp.kit.edu" "portal1.etp.kit.edu")
+    PORTAL_LIST=("bms1.etp.kit.edu" "bms2.etp.kit.edu" "bms3.etp.kit.edu" "portal1.etp.kit.edu" "bms1-centos7" "bms2-centos7")
     CURRENT_HOST=$(hostname --long)
     if [[ ! " ${PORTAL_LIST[*]} " =~ " ${CURRENT_HOST} " ]]; then  
         echo "Current host (${CURRENT_HOST}) not in list of allowed machines:"
@@ -81,21 +81,19 @@ action() {
             CVMFS_ENV_PRESENT="True"
         else
             echo "${ENV_NAME} environment not found in cvmfs. Using conda."
-            if ! command -v conda &> /dev/null; then
-                # Install conda if necessary
-                if [ ! -f "miniconda/bin/activate" ]; then
-                    # Miniconda version used for all environments
-                    MINICONDA_VERSION="Miniconda3-py39_4.10.3-Linux-x86_64"
-                    echo "conda could not be found, installing conda ..."
-                    echo "More information can be found in"
-                    echo "https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html"
-                    curl -O https://repo.anaconda.com/miniconda/${MINICONDA_VERSION}.sh
-                    bash ${MINICONDA_VERSION}.sh -b -p miniconda
-                    rm -f ${MINICONDA_VERSION}.sh
-                fi
-                # source base env of conda
-                source miniconda/bin/activate base
+            # Install conda if necessary
+            if [ ! -f "miniconda/bin/activate" ]; then
+                # Miniconda version used for all environments
+                MINICONDA_VERSION="Miniconda3-py39_4.10.3-Linux-x86_64"
+                echo "conda could not be found, installing conda ..."
+                echo "More information can be found in"
+                echo "https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html"
+                curl -O https://repo.anaconda.com/miniconda/${MINICONDA_VERSION}.sh
+                bash ${MINICONDA_VERSION}.sh -b -p miniconda
+                rm -f ${MINICONDA_VERSION}.sh
             fi
+            # source base env of conda
+            source miniconda/bin/activate ''
 
             # check if correct Conda env is running
             if [ "${CONDA_DEFAULT_ENV}" != "${ENV_NAME}" ]; then
@@ -162,11 +160,16 @@ action() {
             if [ -z "$(ls -A sm-htt-analysis)" ]; then
                 git submodule update --init --recursive -- sm-htt-analysis
             fi
+            export MODULE_PYTHONPATH=sm-htt-analysis
             ;;
         *)
             ;;
     esac
     ############################################
+
+    if [[ ! -z ${MODULE_PYTHONPATH} ]]; then
+        export PYTHONPATH=${MODULE_PYTHONPATH}:${PYTHONPATH}
+    fi
 
     # Check is law was cloned, and set it up if not
     if [ -z "$(ls -A law)" ]; then
@@ -204,8 +207,8 @@ action() {
         luigid --background --logdir logs --state-path luigid_state.pickle --port=$LUIGIPORT
         echo "Luigi scheduler started on port $LUIGIPORT, setting LUIGIPORT to $LUIGIPORT"
     else
-        # first get the PID
-        LUIGIPID=$(pgrep -u ${USER} -f luigid)
+        # first get the (first) PID
+        LUIGIPID=$(pgrep -u ${USER} -f luigid | head -n 1)
         # now get the luigid port that the scheduler is using and set the LUIGIPORT variable
         LUIGIPORT=$(cat /proc/${LUIGIPID}/cmdline | sed -e "s/\x00/ /g" | cut -d "=" -f2)
         echo "Luigi scheduler already running on port ${LUIGIPORT}, setting LUIGIPORT to ${LUIGIPORT}"

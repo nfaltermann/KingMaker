@@ -11,6 +11,7 @@ from law.contrib.htcondor.job import HTCondorJobManager
 from tempfile import mkdtemp
 from getpass import getuser
 from law.target.collection import flatten_collections
+from law.config import Config
 
 law.contrib.load("wlcg")
 law.contrib.load("htcondor")
@@ -28,6 +29,13 @@ if os.getenv("LOCAL_TIMESTAMP"):
 else:
     startup_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
 
+# Determine start dir to replace absolute paths
+# LOCAL_PWD is used by remote workflows
+if os.getenv("LOCAL_PWD"):
+    startup_dir = os.getenv("LOCAL_PWD")
+else:
+    startup_dir = os.getcwd()
+
 
 class Task(law.Task):
 
@@ -41,7 +49,7 @@ class Task(law.Task):
         default="default/{}".format(startup_time),
         description="Tag to differentiate workflow runs. Set to a timestamp as default.",
     )
-    identifier = luigi.ListParameter(
+    task_identifier = luigi.ListParameter(
         default=[],
         description="List of values to distinguish a specific Task from other instances of the same Task. Only takes strings.",
     )
@@ -59,15 +67,42 @@ class Task(law.Task):
         return os.path.join(*parts)
 
     def temporary_local_path(self, *path):
-        temporary_dir = mkdtemp(dir="/tmp/{user}".format(user=self.local_user))
+        if os.environ.get("_CONDOR_JOB_IWD"):
+            prefix = os.environ.get("_CONDOR_JOB_IWD") + "/tmp/"
+        else:
+            prefix = "/tmp/{user}".format(user=self.local_user)
+        temporary_dir = mkdtemp(dir=prefix)
         parts = (temporary_dir,) + (self.__class__.__name__,) + path
         return os.path.join(*parts)
 
-    def local_target(self, *path):
-        return law.LocalFileTarget(self.local_path(*path))
+    def local_target(self, path):
+        return law.LocalFileTarget(self.local_path(path))
+
+    def local_targets(self, paths):
+        targets = []
+        for path in paths:
+            targets.append(law.LocalFileTarget(path=self.local_path(path)))
+        return targets
 
     def temporary_local_target(self, *path):
         return law.LocalFileTarget(self.temporary_local_path(*path))
+
+    # Path of remote targets. Composed from the production_tag,
+    #   the name of the task and an additional path if provided.
+    #   The wlcg_path will be prepended for WLCGFileTargets
+    def remote_path(self, *path):
+        parts = (self.production_tag,) + (self.__class__.__name__,) + path
+        return os.path.join(*parts)
+
+    def remote_target(self, path):
+        target = law.wlcg.WLCGFileTarget(path=self.remote_path(path))
+        return target
+
+    def remote_targets(self, paths):
+        targets = []
+        for path in paths:
+            targets.append(law.wlcg.WLCGFileTarget(path=self.remote_path(path)))
+        return targets
 
     def convert_env_to_dict(self, env):
         my_env = {}
@@ -82,13 +117,13 @@ class Task(law.Task):
 
     # Function to apply a source-script and get the resulting environment.
     #   Anything apart from setting paths is likely not included in the resulting envs.
-    def set_environment(self, sourcescripts, silent=False):
+    def set_environment(self, sourcescript, silent=False):
         if not silent:
-            console.log("with source script: {}".format(sourcescripts))
-        if isinstance(sourcescripts, str):
-            sourcescripts = [sourcescripts]
+            console.log("with source script: {}".format(sourcescript))
+        if isinstance(sourcescript, str):
+            sourcescript = [sourcescript]
         source_command = [
-            "source {};".format(sourcescript) for sourcescript in sourcescripts
+            "source {};".format(sourcescript) for sourcescript in sourcescript
         ] + ["env"]
         source_command_string = " ".join(source_command)
         code, out, error = interruptable_popen(
@@ -114,7 +149,7 @@ class Task(law.Task):
     def run_command(
         self,
         command=[],
-        sourcescripts=[],
+        sourcescript=[],
         run_location=None,
         collect_out=False,
         silent=False,
@@ -127,8 +162,8 @@ class Task(law.Task):
                 logstring += " from {}".format(run_location)
             if not silent:
                 console.log(logstring)
-            if sourcescripts:
-                run_env = self.set_environment(sourcescripts, silent)
+            if sourcescript:
+                run_env = self.set_environment(sourcescript, silent)
             else:
                 run_env = None
             if not silent:
@@ -174,6 +209,7 @@ class Task(law.Task):
             logstring = "Running {}".format(command)
             if run_location:
                 logstring += " from {}".format(run_location)
+            console.rule()
             console.log(logstring)
             try:
                 p = Popen(
@@ -206,23 +242,6 @@ class Task(law.Task):
                 raise Exception("{} failed".format(list(command)))
         else:
             raise Exception("No command provided.")
-
-    # Path of remote targets. Composed from the production_tag,
-    #   the name of the task and an additional path if provided.
-    #   The wlcg_path will be prepended for WLCGFileTargets
-    def remote_path(self, *path):
-        parts = (self.production_tag,) + (self.__class__.__name__,) + path
-        return os.path.join(*parts)
-
-    def remote_target(self, *path):
-        target = law.wlcg.WLCGFileTarget(path=self.remote_path(*path))
-        return target
-
-    def remote_targets(self, paths):
-        targets = []
-        for path in paths:
-            targets.append(law.wlcg.WLCGFileTarget(path=self.remote_path(path)))
-        return targets
 
 
 class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
@@ -278,7 +297,7 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
         # Add identification-str to prevent interference between different tasks of the same class
         # Expand path to account for use of env variables (like $USER)
         return law.wlcg.WLCGDirectoryTarget(
-            self.remote_path("htcondor_files", "_".join(self.identifier)),
+            self.remote_path("htcondor_files", "_".join(self.task_identifier)),
             law.wlcg.WLCGFileSystem(
                 None, base="{}".format(os.path.expandvars(self.wlcg_path))
             ),
@@ -298,17 +317,38 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
     def htcondor_job_config(self, config, job_num, branches):
         analysis_name = os.getenv("ANA_NAME")
         task_name = self.__class__.__name__
-        analysis_path = os.getenv("ANALYSIS_PATH")
+        _cfg = Config.instance()
+        job_file_dir = _cfg.get_expanded("job", "job_file_dir")
+        logdir = os.path.join(
+            os.path.dirname(job_file_dir), "logs", self.production_tag
+        )
+        for file_ in ["Log", "Output", "Error"]:
+            os.makedirs(os.path.join(logdir, file_), exist_ok=True)
+        logfile = os.path.join(
+            logdir, "Log", "{}_{}to{}.txt".format(task_name, branches[0], branches[-1])
+        )
+        outfile = os.path.join(
+            logdir,
+            "Output",
+            "{}_{}to{}.txt".format(task_name, branches[0], branches[-1]),
+        )
+        errfile = os.path.join(
+            logdir,
+            "Error",
+            "{}_{}to{}.txt".format(task_name, branches[0], branches[-1]),
+        )
+
         # Write job config file
         config.custom_content = []
         config.custom_content.append(
             ("accounting_group", self.htcondor_accounting_group)
         )
-        # config.custom_content.append(("Log", "log.txt")) #
-        # config.custom_content.append(("stream_output", "True")) #
-        # config.custom_content.append(("Output", "out_{}to{}.txt".format(branches[0], branches[-1]))) #Remove before commit
-        # config.custom_content.append(("stream_error", "True")) #
-        # config.custom_content.append(("Output", "err_{}to{}.txt".format(branches[0], branches[-1]))) #
+        config.custom_content.append(("Log", logfile))
+        config.custom_content.append(("Output", outfile))
+        config.custom_content.append(("Error", errfile))
+
+        config.custom_content.append(("stream_error", "True"))  # Remove before commit
+        config.custom_content.append(("stream_output", "True"))  #
         if self.htcondor_requirements:
             config.custom_content.append(("Requirements", self.htcondor_requirements))
         config.custom_content.append(("+RemoteJob", self.htcondor_remote_job))
@@ -348,7 +388,7 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
                 "--exclude",
                 "*.pyc",
                 "--exclude",
-                "law/.git",
+                "*.git",
                 "-czf",
                 "tarballs/{}/{}/processor.tar.gz".format(
                     self.production_tag, task_name
@@ -415,13 +455,14 @@ class HTCondorWorkflow(Task, law.htcondor.HTCondorWorkflow):
                 os.path.expandvars(self.wlcg_path) + tarball_env.path
             )
         config.render_variables["LOCAL_TIMESTAMP"] = startup_time
-
+        config.render_variables["LOCAL_PWD"] = startup_dir
+        config.render_variables["MODULE_PYTHONPATH"] = os.getenv("MODULE_PYTHONPATH")
         return config
 
 
 # Class to shorten lookup times for large amounts of output targets
 #    puppet_task: Task to be run
-#    identifier: parameters by which the Class instance can be differentiated
+#    task_identifier: parameters by which the Class instance can be differentiated
 #       from other PuppetMaster tasks that supervise Tasks with the same name
 # Output targets of puppet are saved to the checkfile after puppet is run
 # If output targets of puppet don't match with saved targets, checkfile is removed
@@ -438,7 +479,7 @@ class PuppetMaster(Task):
         puppet = self.puppet_task
         # Construct output filename from class name of puppet and identifier
         class_name = puppet.__class__.__name__
-        unique_par_str = "_".join([class_name] + list(self.identifier))
+        unique_par_str = "_".join([class_name] + list(self.task_identifier))
         filename = unique_par_str + ".json"
         target = self.local_target(filename)
         # Check if existing file matches with new file

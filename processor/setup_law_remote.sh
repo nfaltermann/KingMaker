@@ -8,6 +8,9 @@ action(){
         [ ! -z "$1" ] && export PATH="$1:${PATH}" && echo "Add $1 to PATH"
     }
 
+    SPAWNPOINT=$(pwd)
+    export HOME=${SPAWNPOINT}
+
     # Set USER as local USER
     export USER={{USER}}
     echo "------------------------------------------"
@@ -18,7 +21,7 @@ action(){
     echo " | TAG = {{TAG}}"
     echo " | USE_CVMFS = {{USE_CVMFS}}"
     echo " | TARBALL_PATH = {{TARBALL_PATH}}"
-    SPAWNPOINT=$(pwd)
+
     if [[ "{{USE_CVMFS}}" == "True" ]]; then
         ENV_PATH=/cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate
         echo " | ENV_PATH = ${ENV_PATH}"
@@ -38,7 +41,7 @@ action(){
     else
         # Copy tarballs 
         (
-            source /cvmfs/etp.kit.edu/LAW_envs/KingMaker/bin/activate
+            source /cvmfs/etp.kit.edu/LAW_envs/conda_envs/miniconda/bin/activate KingMaker
             echo "xrdcp {{TARBALL_PATH}} ${SPAWNPOINT}"
             xrdcp {{TARBALL_PATH}} ${SPAWNPOINT}
             echo "xrdcp {{TARBALL_ENV_PATH}} ${SPAWNPOINT}"
@@ -62,13 +65,22 @@ action(){
     _addpy "${SPAWNPOINT}/processor"
     _addpy "${SPAWNPOINT}/processor/tasks"
 
+    # Analysis specific modules
+    MODULE_PYTHONPATH="{{MODULE_PYTHONPATH}}"
+    if [[ ! -z ${MODULE_PYTHONPATH} ]]; then
+        _addpy ${MODULE_PYTHONPATH}
+    fi
+
     # setup law variables
     export LAW_HOME="${SPAWNPOINT}/.law"
     export LAW_CONFIG_FILE="${SPAWNPOINT}/lawluigi_configs/{{ANA_NAME}}_law.cfg"
     export LUIGI_CONFIG_PATH="${SPAWNPOINT}/lawluigi_configs/{{ANA_NAME}}_luigi.cfg"
 
+    # Variables set by local LAW instance and used by batch job LAW instance
     export LOCAL_TIMESTAMP="{{LOCAL_TIMESTAMP}}"
+    export LOCAL_PWD="{{LOCAL_PWD}}"
 
+    export ANALYSIS_DATA_PATH=$(pwd)
 }
 
 action
