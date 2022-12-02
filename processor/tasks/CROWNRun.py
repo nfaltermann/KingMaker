@@ -169,7 +169,7 @@ class CROWNRun(HTCondorWorkflow, law.LocalWorkflow):
                     "processor/tasks/ResetROOTStatusBit.py",
                     "--input {}".format(local_filename),
                 ],
-                sourcescripts=[
+                sourcescript=[
                     "{}/init.sh".format(_workdir),
                 ],
             )

@@ -67,6 +67,7 @@ class CROWNBuild(Task):
             console.log(
                 "tarball already existing in tarball directory {}".format(_install_dir)
             )
+            console.log("Copying to remote: {}".format(output.path))
             output.copy_from_local(os.path.join(_install_dir, output.basename))
         else:
             console.rule("Building new CROWN tarball")
