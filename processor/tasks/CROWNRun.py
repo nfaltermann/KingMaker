@@ -163,16 +163,16 @@ class CROWNRun(HTCondorWorkflow, law.LocalWorkflow):
             )
             # if the output files were produced in multithreaded mode, we have to open the files once again, setting the
             # kEntriesReshuffled bit to false, otherwise, we cannot add any friends to the trees
-            self.run_command(
-                command=[
-                    "python",
-                    "processor/tasks/ResetROOTStatusBit.py",
-                    "--input {}".format(local_filename),
-                ],
-                sourcescript=[
-                    "{}/init.sh".format(_workdir),
-                ],
-            )
+            # self.run_command(
+            #     command=[
+            #         "python",
+            #         "processor/tasks/ResetROOTStatusBit.py",
+            #         "--input {}".format(local_filename),
+            #     ],
+            #     sourcescript=[
+            #         "{}/init.sh".format(_workdir),
+            #     ],
+            # )
             # for each outputfile, add the scope suffix
             outputfile.copy_from_local(local_filename)
         console.rule("Finished CROWNRun")
