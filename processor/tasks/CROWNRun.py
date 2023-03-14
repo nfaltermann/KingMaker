@@ -11,10 +11,9 @@ from framework import console
 from framework import Task, HTCondorWorkflow
 
 
-def ensure_dir(file_path):
-    directory = os.path.dirname(file_path)
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+def create_abspath(file_path):
+    if not os.path.exists(file_path):
+        os.makedirs(file_path)
 
 
 class CROWNRun(HTCondorWorkflow, law.LocalWorkflow):
@@ -24,33 +23,53 @@ class CROWNRun(HTCondorWorkflow, law.LocalWorkflow):
 
     output_collection_cls = law.NestedSiblingFileCollection
 
-    nick = luigi.Parameter()
     scopes = luigi.ListParameter()
+    all_sampletypes = luigi.ListParameter()
+    all_eras = luigi.ListParameter()
+    nick = luigi.Parameter()
     sampletype = luigi.Parameter()
-    sampletypes = luigi.ListParameter()
     era = luigi.Parameter()
-    eras = luigi.ListParameter()
     analysis = luigi.Parameter()
     config = luigi.Parameter()
     production_tag = luigi.Parameter()
-    files_per_task = luigi.IntParameter(default=1)
+    files_per_task = luigi.IntParameter()
 
     def htcondor_job_config(self, config, job_num, branches):
         config = super().htcondor_job_config(config, job_num, branches)
         config.custom_content.append(
-            ("JobBatchName", f"{self.nick}-{self.analysis}-{self.config}")
+            (
+                "JobBatchName",
+                f"{self.nick}-{self.analysis}-{self.config}-{self.production_tag}",
+            )
         )
+        for type in ["Log", "Output", "Error"]:
+            logfilepath = ""
+            for param in config.custom_content:
+                if param[0] == type:
+                    logfilepath = param[1]
+                    break
+            # split the filename, and add the sample nick as an additional folder
+            logfolder = logfilepath.split("/")[:-1]
+            logfile = logfilepath.split("/")[-1]
+            logfolder.append(self.nick)
+            # create the new path
+            os.makedirs("/".join(logfolder), exist_ok=True)
+            config.custom_content.append((type, "/".join(logfolder) + "/" + logfile))
         return config
 
     def modify_polling_status_line(self, status_line):
         """
         Hook to modify the status line that is printed during polling.
         """
-        return f"{status_line} - {law.util.colored(self.nick, color='light_cyan')}"
+        name = f"{self.nick} (Analysis: {self.analysis} Config: {self.config} Tag: {self.production_tag})"
+        return f"{status_line} - {law.util.colored(name, color='light_cyan')}"
 
     def workflow_requires(self):
-        requirements = super(CROWNRun, self).workflow_requires()
-        requirements["datasetinfo"] = ConfigureDatasets.req(self)
+        requirements = {}
+        requirements["dataset"] = {}
+        requirements["dataset"] = ConfigureDatasets.req(
+            self, nick=self.nick, production_tag=self.production_tag
+        )
         requirements["tarball"] = CROWNBuild.req(self)
         return requirements
 
@@ -58,29 +77,51 @@ class CROWNRun(HTCondorWorkflow, law.LocalWorkflow):
         return {"tarball": CROWNBuild.req(self)}
 
     def create_branch_map(self):
-        dataset = ConfigureDatasets(nick=self.nick, production_tag=self.production_tag)
-        dataset.run()
-        with self.input()["datasetinfo"].localize("r") as _file:
-            inputdata = _file.load()
         branch_map = {}
+        branchcounter = 0
+        dataset = ConfigureDatasets(nick=self.nick, production_tag=self.production_tag)
+        # since we use the filelist from the dataset, we need to run it first
+        dataset.run()
+        datsetinfo = dataset.output()
+        with datsetinfo.localize("r") as _file:
+            inputdata = _file.load()
+        branches = {}
         if len(inputdata["filelist"]) == 0:
             raise Exception("No files found for dataset {}".format(self.nick))
-        for i, filename in enumerate(inputdata["filelist"]):
-            if (int(i / self.files_per_task)) not in branch_map:
-                branch_map[int(i / self.files_per_task)] = []
-            branch_map[int(i / self.files_per_task)].append(filename)
+        for filecounter, filename in enumerate(inputdata["filelist"]):
+            if (int(filecounter / self.files_per_task)) not in branches:
+                branches[int(filecounter / self.files_per_task)] = []
+            branches[int(filecounter / self.files_per_task)].append(filename)
+        for x in branches:
+            branch_map[branchcounter] = {}
+            branch_map[branchcounter]["nick"] = self.nick
+            branch_map[branchcounter]["era"] = self.era
+            branch_map[branchcounter]["sampletype"] = self.sampletype
+            branch_map[branchcounter]["files"] = branches[x]
+            branchcounter += 1
         return branch_map
 
     def output(self):
+        targets = []
         nicks = [
             "{era}/{nick}/{scope}/{nick}_{branch}.root".format(
-                era=self.era,
-                nick=self.nick,
+                era=self.branch_data["era"],
+                nick=self.branch_data["nick"],
                 branch=self.branch,
                 scope=scope,
             )
             for scope in self.scopes
         ]
+        # quantities_map json for each scope only needs to be created once per sample
+        if self.branch == 0:
+            nicks += [
+                "{era}/{nick}/{scope}/{era}_{nick}_{scope}_quantities_map.json".format(
+                    era=self.branch_data["era"],
+                    nick=self.branch_data["nick"],
+                    scope=scope,
+                )
+                for scope in self.scopes
+            ]
         targets = self.remote_targets(nicks)
         for target in targets:
             target.parent.touch()
@@ -88,16 +129,26 @@ class CROWNRun(HTCondorWorkflow, law.LocalWorkflow):
 
     def run(self):
         outputs = self.output()
-        info = self.branch_data
-        _workdir = os.path.abspath("workdir")
-        ensure_dir(_workdir)
-        _inputfiles = info
+        rootfile_outputs = [x for x in outputs if x.path.endswith(".root")]
+        quantities_map_outputs = [
+            x for x in outputs if x.path.endswith("quantities_map.json")
+        ]
+        branch_data = self.branch_data
+        _base_workdir = os.path.abspath("workdir")
+        create_abspath(_base_workdir)
+        _workdir = os.path.join(
+            _base_workdir, f"{self.production_tag}_{self.analysis}_{self.config}"
+        )
+        create_abspath(_workdir)
+        _inputfiles = branch_data["files"]
         # set the outputfilename to the first name in the output list, removing the scope suffix
         _outputfile = str(
-            outputs[0].basename.replace("_{}.root".format(self.scopes[0]), ".root")
+            rootfile_outputs[0].basename.replace(
+                "_{}.root".format(self.scopes[0]), ".root"
+            )
         )
-        _executable = "{}/{}_{}_{}".format(
-            _workdir, self.config, self.sampletype, self.era
+        _abs_executable = "{}/{}_{}_{}".format(
+            _workdir, self.config, branch_data["sampletype"], branch_data["era"]
         )
         console.log(
             "Getting CROWN tarball from {}".format(self.input()["tarball"].uri())
@@ -105,24 +156,26 @@ class CROWNRun(HTCondorWorkflow, law.LocalWorkflow):
         with self.input()["tarball"].localize("r") as _file:
             _tarballpath = _file.path
         # first unpack the tarball if the exec is not there yet
-        if os.path.exists(
-            "unpacking_{}_{}_{}".format(self.config, self.sampletype, self.era)
-        ):
-            time.sleep(5)
-        if not os.path.exists(_executable):
-            open(
-                "unpacking_{}_{}_{}".format(self.config, self.sampletype, self.era),
-                "a",
-            ).close()
+        _tempfile = os.path.join(
+            _workdir,
+            "unpacking_{}_{}_{}".format(
+                self.config, branch_data["sampletype"], branch_data["era"]
+            ),
+        )
+        while os.path.exists(_tempfile):
+            time.sleep(1)
+        if not os.path.exists(_abs_executable) and not os.path.exists(_tempfile):
+            # create a temp file to signal that we are unpacking
+            open(_tempfile, "a").close()
             tar = tarfile.open(_tarballpath, "r:gz")
-            tar.extractall("workdir")
-            os.remove(
-                "unpacking_{}_{}_{}".format(self.config, self.sampletype, self.era)
-            )
+            tar.extractall(_workdir)
+            os.remove(_tempfile)
         # set environment using env script
         my_env = self.set_environment("{}/init.sh".format(_workdir))
         _crown_args = [_outputfile] + _inputfiles
-        _executable = "./{}_{}_{}".format(self.config, self.sampletype, self.era)
+        _executable = "./{}_{}_{}".format(
+            self.config, branch_data["sampletype"], branch_data["era"]
+        )
         # actual payload:
         console.rule("Starting CROWNRun")
         console.log("Executable: {}".format(_executable))
@@ -155,24 +208,55 @@ class CROWNRun(HTCondorWorkflow, law.LocalWorkflow):
         else:
             console.log("Successful")
         console.log("Output files afterwards: {}".format(os.listdir(_workdir)))
-        for i, outputfile in enumerate(outputs):
+        for i, outputfile in enumerate(rootfile_outputs):
             outputfile.parent.touch()
             local_filename = os.path.join(
                 _workdir,
                 _outputfile.replace(".root", "_{}.root".format(self.scopes[i])),
             )
-            # if the output files were produced in multithreaded mode, we have to open the files once again, setting the
-            # kEntriesReshuffled bit to false, otherwise, we cannot add any friends to the trees
-            # self.run_command(
-            #     command=[
-            #         "python",
-            #         "processor/tasks/ResetROOTStatusBit.py",
-            #         "--input {}".format(local_filename),
-            #     ],
-            #     sourcescript=[
-            #         "{}/init.sh".format(_workdir),
-            #     ],
-            # )
+            # if the output files were produced in multithreaded mode,
+            # we have to open the files once again, setting the
+            # kEntriesReshuffled bit to false, otherwise,
+            # we cannot add any friends to the trees
+            self.run_command(
+                command=[
+                    "python3",
+                    "processor/tasks/helpers/ResetROOTStatusBit.py",
+                    "--input {}".format(local_filename),
+                ],
+                sourcescript=[
+                    "{}/init.sh".format(_workdir),
+                ],
+                silent=True,
+            )
             # for each outputfile, add the scope suffix
             outputfile.copy_from_local(local_filename)
+        # write the quantities_map json, per scope This is only required once per sample,
+        # only do it if the branch number is 0
+        if self.branch == 0:
+            for i, outputfile in enumerate(quantities_map_outputs):
+                outputfile.parent.touch()
+                inputfile = os.path.join(
+                    _workdir,
+                    _outputfile.replace(".root", "_{}.root".format(self.scopes[i])),
+                )
+                local_outputfile = os.path.join(_workdir, "quantities_map.json")
+
+                self.run_command(
+                    command=[
+                        "python3",
+                        "processor/tasks/helpers/GetQuantitiesMap.py",
+                        "--input {}".format(inputfile),
+                        "--era {}".format(self.branch_data["era"]),
+                        "--scope {}".format(self.scopes[i]),
+                        "--sampletype {}".format(self.branch_data["sampletype"]),
+                        "--output {}".format(local_outputfile),
+                    ],
+                    sourcescript=[
+                        "{}/init.sh".format(_workdir),
+                    ],
+                    silent=True,
+                )
+                # copy the generated quantities_map json to the output
+                outputfile.copy_from_local(local_outputfile)
         console.rule("Finished CROWNRun")

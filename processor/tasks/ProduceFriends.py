@@ -1,22 +1,27 @@
 import luigi
 import yaml
-from CROWNRun import CROWNRun
+import law
+from CROWNFriends import CROWNFriends
 from framework import console
 from law.task.base import WrapperTask
 from rich.table import Table
 
 
-class ProduceSamples(WrapperTask):
+class ProduceFriends(WrapperTask):
     """
-    collective task to trigger ntuple production for a list of samples
+    collective task to trigger friend production for a list of samples,
+    if the samples are not already present, trigger ntuple production first
     """
 
     sample_list = luigi.Parameter()
     analysis = luigi.Parameter()
+    friend_config = luigi.Parameter()
+    friend_name = luigi.Parameter()
     config = luigi.Parameter()
     dataset_database = luigi.Parameter()
     production_tag = luigi.Parameter()
-    scopes = luigi.ListParameter()
+    shifts = luigi.Parameter()
+    scopes = luigi.Parameter()
 
     def requires(self):
         # load the list of samples to be processed
@@ -36,13 +41,19 @@ class ProduceSamples(WrapperTask):
         console.rule("")
         console.log(f"Production tag: {self.production_tag}")
         console.log(f"Analysis: {self.analysis}")
-        console.log(f"Config: {self.config}")
+        console.log(f"Friend Config: {self.friend_config}")
         console.rule("")
-        table = Table(title=f"Samples (selected Scopes: {self.scopes})")
+        table = Table(title="Samples to be processed")
 
         table.add_column("Samplenick", justify="left")
         table.add_column("Era", justify="left")
         table.add_column("Sampletype", justify="left")
+
+        # sanitize the scopes information
+        if isinstance(self.scopes, str):
+            self.scopes = self.scopes.split(",")
+        elif isinstance(self.scopes, list):
+            self.scopes = self.scopes
 
         for i, nick in enumerate(samples):
             data["details"][nick] = {}
@@ -67,20 +78,23 @@ class ProduceSamples(WrapperTask):
         console.log(table)
 
         console.log(
-            f"Producing ntuples for {len(data['details'])} samples in {len(data['eras'])} eras and {len(self.scopes)} scopes"
+            f"Producing friends for {len(data['details'])} samples in {len(data['eras'])} eras and {len(self.scopes)} scopes"
         )
         console.rule("")
         requirements = {}
         for samplenick in data["details"]:
-            requirements[f"CROWNRun_{samplenick}"] = CROWNRun(
+            requirements[f"CROWNFriends_{samplenick}"] = CROWNFriends(
                 nick=samplenick,
                 analysis=self.analysis,
                 config=self.config,
                 production_tag=self.production_tag,
                 all_eras=data["eras"],
                 all_sampletypes=data["sampletypes"],
+                scopes=self.scopes,
                 era=data["details"][samplenick]["era"],
                 sampletype=data["details"][samplenick]["sampletype"],
+                friend_config=self.friend_config,
+                friend_name=self.friend_name,
             )
 
         return requirements

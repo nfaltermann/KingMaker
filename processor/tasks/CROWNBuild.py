@@ -5,6 +5,19 @@ from law.util import interruptable_popen
 from framework import Task
 from framework import console
 
+# import time
+# import timeout_decorator
+# from multiprocessing import Process
+
+
+def convert_to_comma_seperated(list):
+    if isinstance(list, str):
+        return list
+    elif len(list) == 1:
+        return list[0]
+    else:
+        return ",".join(list)
+
 
 class CROWNBuild(Task):
     """
@@ -16,8 +29,8 @@ class CROWNBuild(Task):
     shifts = luigi.Parameter()
     build_dir = luigi.Parameter()
     install_dir = luigi.Parameter()
-    eras = luigi.ListParameter()
-    sampletypes = luigi.ListParameter()
+    all_eras = luigi.ListParameter()
+    all_sampletypes = luigi.ListParameter()
     analysis = luigi.Parameter()
     config = luigi.Parameter()
     htcondor_request_cpus = luigi.IntParameter(default=1)
@@ -38,18 +51,12 @@ class CROWNBuild(Task):
         # get output file path
         output = self.output()
         # convert list to comma separated strings
-        if len(self.sampletypes) == 1:
-            _sampletypes = self.sampletypes[0]
-        else:
-            _sampletypes = ",".join(self.sampletypes)
-        if len(self.eras) == 1:
-            _eras = self.eras[0]
-        else:
-            _eras = ",".join(self.eras)
-        _scopes = ",".join(self.scopes)
+        _all_sampletypes = convert_to_comma_seperated(self.all_sampletypes)
+        _all_eras = convert_to_comma_seperated(self.all_eras)
+        _shifts = convert_to_comma_seperated(self.shifts)
+        _scopes = convert_to_comma_seperated(self.scopes)
         _analysis = str(self.analysis)
         _config = str(self.config)
-        _shifts = str(self.shifts)
         _threads = str(self.threads)
         # also use the tag for the local tarball creation
         _tag = "{}/CROWN_{}_{}".format(self.production_tag, _analysis, _config)
@@ -59,16 +66,13 @@ class CROWNBuild(Task):
         _compile_script = os.path.join(
             str(os.path.abspath("processor")), "tasks", "compile_crown.sh"
         )
-
-        if os.path.exists(output.path):
-            console.log("tarball already existing in {}".format(output.path))
-
-        elif os.path.exists(os.path.join(_install_dir, output.basename)):
+        if os.path.exists(os.path.join(_install_dir, output.basename)):
             console.log(
                 "tarball already existing in tarball directory {}".format(_install_dir)
             )
-            console.log("Copying to remote: {}".format(output.path))
-            output.copy_from_local(os.path.join(_install_dir, output.basename))
+            self.upload_tarball(
+                output, os.path.join(os.path.abspath(_install_dir), output.basename), 10
+            )
         else:
             console.rule("Building new CROWN tarball")
             # create build directory
@@ -100,9 +104,9 @@ class CROWNBuild(Task):
             console.log("Threads: {}".format(_threads))
             console.log("Analysis: {}".format(_analysis))
             console.log("Config: {}".format(_config))
-            console.log("Sampletype: {}".format(_sampletypes))
-            console.log("Era: {}".format(_eras))
-            console.log("Channels: {}".format(_scopes))
+            console.log("Sampletypes: {}".format(_all_sampletypes))
+            console.log("Eras: {}".format(_all_eras))
+            console.log("Scopes: {}".format(_scopes))
             console.log("Shifts: {}".format(_shifts))
             console.rule("")
 
@@ -113,8 +117,8 @@ class CROWNBuild(Task):
                 _crown_path,  # CROWNFOLDER=$1
                 _analysis,  # ANALYSIS=$2
                 _config,  # CONFIG=$3
-                _sampletypes,  # SAMPLES=$4
-                _eras,  # ERAS=$5
+                _all_sampletypes,  # SAMPLES=$4
+                _all_eras,  # all_eras=$5
                 _scopes,  # SCOPES=$6
                 _shifts,  # SHIFTS=$7
                 _install_dir,  # INSTALLDIR=$8
@@ -123,12 +127,16 @@ class CROWNBuild(Task):
                 _threads,  # THREADS=$11
             ]
             self.run_command_readable(command)
-            console.log(
-                "Copying from local: {}".format(
-                    os.path.join(_install_dir, output.basename)
-                )
-            )
-            output.parent.touch()
-            console.log("Copying to remote: {}".format(output.path))
-            output.copy_from_local(os.path.join(_install_dir, output.basename))
-        console.rule("Finished CROWNRun")
+            console.rule("Finished CROWNBuild")
+            self.upload_tarball(output, os.path.join(_install_dir, output.basename), 10)
+
+    # @timeout_decorator.timeout(10)
+    def upload_tarball(self, output, path, timeout):
+        console.log("Copying from local: {}".format(path))
+        output.parent.touch()
+        timeout = 10
+        console.log(
+            f"Copying to remote with a {timeout} second timeout : {output.path}"
+        )
+        output.copy_from_local(path)
+        return True
